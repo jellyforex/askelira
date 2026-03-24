@@ -158,6 +158,28 @@ export class GatewayClient extends EventEmitter {
     totalLatencyMs: 0,
   };
 
+  // Feature 21: Per-agent timeout config
+  private static readonly AGENT_TIMEOUTS: Record<string, number> = {
+    alba: 180000,
+    david: 300000,
+    vex1: 120000,
+    vex2: 120000,
+    elira: 180000,
+    steven: 120000,
+  };
+
+  // Feature 22: Session reuse tracking
+  private activeSessions = new Map<string, string>();
+
+  // Feature 23: Request deduplication
+  private recentRequestHashes = new Map<string, { response: string; timestamp: number }>();
+  private static readonly DEDUP_WINDOW_MS = 5000;
+
+  // Feature 24: Latency monitoring (rolling window of last 10)
+  private latencyWindow: number[] = [];
+  private static readonly LATENCY_WINDOW_SIZE = 10;
+  private static readonly LATENCY_ALERT_THRESHOLD_MS = 10000;
+
   constructor(config: GatewayClientConfig) {
     super();
     this.config = {
@@ -476,7 +498,22 @@ export class GatewayClient extends EventEmitter {
     const label = params.agentName || 'Agent';
     const idempotencyKey = `${label}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
-    console.log(`[Gateway] Invoking ${label} via gateway...`);
+    // Feature 21: Use per-agent timeout if available
+    const agentKey = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const perAgentTimeout = GatewayClient.AGENT_TIMEOUTS[agentKey];
+    if (perAgentTimeout && !params.timeoutMs) {
+      params.timeoutMs = perAgentTimeout;
+    }
+
+    // Feature 23: Request deduplication
+    const requestHash = `${label}:${params.userMessage.slice(0, 200)}`;
+    const cachedDedup = this.recentRequestHashes.get(requestHash);
+    if (cachedDedup && Date.now() - cachedDedup.timestamp < GatewayClient.DEDUP_WINDOW_MS) {
+      console.log(`[Gateway] Dedup hit for ${label}, returning cached response`);
+      return cachedDedup.response;
+    }
+
+    console.log(`[Gateway] Invoking ${label} via gateway (timeout: ${params.timeoutMs || this.config.requestTimeoutMs}ms)...`);
     this.metrics.requestsViaGateway++;
 
     try {
@@ -538,6 +575,30 @@ export class GatewayClient extends EventEmitter {
 
       const duration = Date.now() - startTime;
       console.log(`[Gateway] ${label} complete via gateway (${duration}ms)`);
+
+      // Feature 23: Cache response for dedup
+      this.recentRequestHashes.set(requestHash, { response: responseText, timestamp: Date.now() });
+      // Cleanup old entries
+      for (const [key, val] of this.recentRequestHashes) {
+        if (Date.now() - val.timestamp > GatewayClient.DEDUP_WINDOW_MS) {
+          this.recentRequestHashes.delete(key);
+        }
+      }
+
+      // Feature 24: Record latency and check rolling average
+      this.latencyWindow.push(duration);
+      if (this.latencyWindow.length > GatewayClient.LATENCY_WINDOW_SIZE) {
+        this.latencyWindow.shift();
+      }
+      const avgLatency = this.latencyWindow.reduce((a, b) => a + b, 0) / this.latencyWindow.length;
+      if (avgLatency > GatewayClient.LATENCY_ALERT_THRESHOLD_MS && this.latencyWindow.length >= 5) {
+        console.warn(`[Gateway] HIGH LATENCY: Rolling avg ${Math.round(avgLatency)}ms exceeds ${GatewayClient.LATENCY_ALERT_THRESHOLD_MS}ms`);
+        notify(`[Gateway] High latency alert: rolling avg ${Math.round(avgLatency)}ms`);
+      }
+
+      // Feature 22: Track session reuse
+      this.activeSessions.set(label, this.sessionId || '');
+
       return responseText;
     } catch (err) {
       const duration = Date.now() - startTime;
@@ -588,7 +649,8 @@ export class GatewayClient extends EventEmitter {
       this.config.maxReconnectDelayMs,
     );
 
-    console.log(`[Gateway] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts + 1})...`);
+    // Feature 26: Log reconnect attempt number and seconds until next attempt
+    console.log(`[Gateway] Reconnecting in ${Math.round(delay / 1000)}s (attempt ${this.reconnectAttempts + 1}, next try at ${new Date(Date.now() + delay).toISOString()})`);
     this.emit('reconnecting', { delay, attempt: this.reconnectAttempts + 1 });
 
     this.reconnectTimer = setTimeout(async () => {
@@ -628,7 +690,9 @@ export class GatewayClient extends EventEmitter {
         failures: this.circuitBreaker.failures,
         cooldownMs: this.config.circuitBreakerCooldownMs,
       });
-      notify(`🔴 Gateway *circuit breaker OPEN* — ${this.circuitBreaker.failures} failures, degraded for ${this.config.circuitBreakerCooldownMs / 1000}s`);
+      // Feature 25: Include which agent triggered circuit breaker
+      const lastAgent = Array.from(this.activeSessions.keys()).pop() || 'unknown';
+      notify(`Gateway *circuit breaker OPEN* -- ${this.circuitBreaker.failures} failures (last agent: ${lastAgent}), degraded for ${this.config.circuitBreakerCooldownMs / 1000}s`);
     }
   }
 
@@ -674,6 +738,38 @@ export class GatewayClient extends EventEmitter {
 
   getSessionId(): string | null {
     return this.sessionId;
+  }
+
+  // Feature 28: Cleanup stale sessions after build completes
+  cleanupStaleSessions(): void {
+    this.activeSessions.clear();
+    // Cleanup old dedup entries
+    for (const [key, val] of this.recentRequestHashes) {
+      if (Date.now() - val.timestamp > GatewayClient.DEDUP_WINDOW_MS * 2) {
+        this.recentRequestHashes.delete(key);
+      }
+    }
+    console.log('[Gateway] Stale sessions cleaned up');
+  }
+
+  // Feature 30: Health info for health endpoint
+  getHealthInfo(): {
+    status: string;
+    circuitBreaker: string;
+    recentLatencyMs: number;
+    sessionId: string | null;
+    activeSessions: number;
+  } {
+    const avgLatency = this.latencyWindow.length > 0
+      ? Math.round(this.latencyWindow.reduce((a, b) => a + b, 0) / this.latencyWindow.length)
+      : 0;
+    return {
+      status: this.getStatus(),
+      circuitBreaker: this.isDegraded() ? 'open' : 'closed',
+      recentLatencyMs: avgLatency,
+      sessionId: this.sessionId,
+      activeSessions: this.activeSessions.size,
+    };
   }
 }
 

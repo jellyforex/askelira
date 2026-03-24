@@ -34,7 +34,9 @@ export interface RouteAgentCallParams {
 // Configuration
 // ============================================================
 
+// Feature 27: Re-read AGENT_ROUTING_MODE on each call (hot-reload)
 function getRoutingMode(): AgentRoutingMode {
+  // Always read fresh from env (not cached at import time)
   const mode = process.env.AGENT_ROUTING_MODE || 'gateway';
   if (mode === 'direct' || mode === 'gateway-only' || mode === 'gateway') {
     return mode;
@@ -58,6 +60,21 @@ const routingMetrics = {
 
 export function getRoutingMetrics() {
   return { ...routingMetrics };
+}
+
+// Feature 29: Save routing metrics to DB per build
+export async function saveRoutingMetrics(goalId: string): Promise<void> {
+  try {
+    const { logAgentAction } = await import('./building-manager');
+    await logAgentAction({
+      goalId,
+      agentName: 'System',
+      action: 'routing_metrics',
+      outputSummary: JSON.stringify(routingMetrics),
+    });
+  } catch {
+    // best-effort
+  }
 }
 
 // ============================================================
