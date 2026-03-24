@@ -21,8 +21,5 @@ export async function register() {
       }
     }
 
-    // Phase 5: Recover heartbeats for active goals
-    const { recoverHeartbeats } = await import('./lib/heartbeat-recovery');
-    await recoverHeartbeats();
   }
 }

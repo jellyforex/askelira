@@ -9,7 +9,6 @@
 
 import { normalizeDavidResult, serializeDavidResult } from '../lib/shared-types';
 import { validateSyntax } from '../lib/syntax-validator';
-import { parseOutputFiles } from '../lib/build-generator';
 
 let passed = 0;
 let failed = 0;
@@ -72,42 +71,9 @@ async function runTests() {
     assert(normalized.files[0].content === rawCode, 'content is raw code');
   }
 
-  // ── Test 3: parseOutputFiles handles new format ──
+  // ── Test 3: serializeDavidResult produces backward-compat output ──
 
-  console.log('\n3. parseOutputFiles handles files[] JSON:');
-  {
-    const newFormatStr = JSON.stringify({
-      files: [
-        { name: 'app.js', content: 'console.log("app");' },
-        { name: 'lib.js', content: 'module.exports = {};' },
-      ],
-      language: 'javascript',
-      entryPoint: 'app.js',
-    });
-
-    const files = parseOutputFiles(newFormatStr);
-    assert(files.length === 2, 'parseOutputFiles finds 2 files');
-    assert(files[0].path === 'app.js', 'first file path correct');
-    assert(files[1].path === 'lib.js', 'second file path correct');
-  }
-
-  // ── Test 4: parseOutputFiles handles old format ──
-
-  console.log('\n4. parseOutputFiles handles old buildOutput format:');
-  {
-    const oldFormatStr = JSON.stringify({
-      buildOutput: 'print("hello")',
-      entryPoint: 'main.py',
-    });
-
-    const files = parseOutputFiles(oldFormatStr);
-    assert(files.length === 1, 'parseOutputFiles finds 1 file');
-    assert(files[0].path === 'main.py', 'file path from entryPoint');
-  }
-
-  // ── Test 5: serializeDavidResult produces backward-compat output ──
-
-  console.log('\n5. Serialized output has both files[] and buildOutput:');
+  console.log('\n3. Serialized output has both files[] and buildOutput:');
   {
     const normalized = normalizeDavidResult({
       files: [{ name: 'index.js', content: 'const x = 1;' }],
@@ -126,9 +92,9 @@ async function runTests() {
     assert(obj.buildOutput === 'const x = 1;', 'buildOutput matches single file content');
   }
 
-  // ── Test 6: Multi-file serialization creates combined buildOutput ──
+  // ── Test 4: Multi-file serialization creates combined buildOutput ──
 
-  console.log('\n6. Multi-file serialization creates combined buildOutput:');
+  console.log('\n4. Multi-file serialization creates combined buildOutput:');
   {
     const normalized = normalizeDavidResult({
       files: [

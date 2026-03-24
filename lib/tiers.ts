@@ -36,11 +36,6 @@ export function getTierForEmail(email: string, plan?: string): TierConfig {
   return TIERS[plan || 'free'] || TIERS.free;
 }
 
-export function getRateLimit(email: string, plan?: string): { limit: number; tier: TierConfig } {
-  const tier = getTierForEmail(email, plan);
-  return { limit: tier.monthlyDebates, tier };
-}
-
 export interface UsageCheck {
   allowed: boolean;
   remaining: number;
@@ -48,16 +43,6 @@ export interface UsageCheck {
   tier: TierConfig;
   isOverage: boolean;
   overageCost: number;
-}
-
-const BUILD_LIMITS: Record<string, number> = {
-  Free: 0,
-  Pro: 5,
-  Enterprise: Infinity,
-};
-
-export function getBuildLimit(tierName: string): number {
-  return BUILD_LIMITS[tierName] ?? 0;
 }
 
 export function checkUsage(

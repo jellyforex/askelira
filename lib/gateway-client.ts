@@ -518,12 +518,17 @@ export class GatewayClient extends EventEmitter {
           resolve(text || JSON.stringify(payload));
         });
 
+        // Prepend systemPrompt to message so the gateway agent sees format constraints
+        const fullMessage = params.systemPrompt
+          ? `[SYSTEM INSTRUCTIONS — follow exactly]\n${params.systemPrompt}\n\n[USER REQUEST]\n${params.userMessage}`
+          : params.userMessage;
+
         this.send({
           type: 'req',
           id: reqId,
           method: 'agent',
           params: {
-            message: params.userMessage,
+            message: fullMessage,
             idempotencyKey,
             agentId: 'main',
             channel: 'webchat',

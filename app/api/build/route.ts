@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { getTierForEmail, getBuildLimit } from '@/lib/tiers';
+import { getTierForEmail } from '@/lib/tiers';
 import { sseHeaders } from '@/lib/progress-tracker';
 import { waitUntil } from '@vercel/functions';
 
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
     // Tier + build limit check
     const usage = await getUserBuildData(email);
     const tier = getTierForEmail(email, usage.plan);
-    const buildLimit = getBuildLimit(tier.name);
+    const buildLimit = tier.unlimited ? Infinity : tier.monthlyDebates;
 
     const buildsUsed = (usage as { buildsUsed?: number }).buildsUsed ?? 0;
 

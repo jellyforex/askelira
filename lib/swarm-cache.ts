@@ -34,7 +34,3 @@ export function cacheSet(result: SwarmResult, ttl: number = DEFAULT_TTL): void {
     expiresAt: Date.now() + ttl,
   });
 }
-
-export function cacheHas(id: string): boolean {
-  return cacheGet(id) !== null;
-}

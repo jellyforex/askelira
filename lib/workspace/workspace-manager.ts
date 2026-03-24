@@ -38,41 +38,11 @@ export async function writeAgents(content: string): Promise<void> {
   await fs.writeFile(p, content, 'utf-8');
 }
 
-export async function writeResults(results: string): Promise<void> {
-  const agentsContent = await readAgents();
-  const timestamp = new Date().toISOString();
-  const resultsBlock = `\n\n## Results (${timestamp})\n\n${results}`;
-  const cleaned = agentsContent.replace(/\n\n## Results[\s\S]*$/, '');
-  await writeAgents(cleaned + resultsBlock);
-}
-
 export async function readAllWorkspace(): Promise<WorkspaceFiles> {
   const [soul, agents, tools] = await Promise.all([
     readSoul(), readAgents(), readTools(),
   ]);
   return { soul, agents, tools };
-}
-
-export async function initWorkspace(): Promise<void> {
-  const workspacePath = getWorkspacePath();
-  await fs.mkdir(workspacePath, { recursive: true });
-  await fs.mkdir(path.join(workspacePath, 'builds'), { recursive: true });
-  const soulPath = path.join(workspacePath, 'SOUL.md');
-  const agentsPath = path.join(workspacePath, 'AGENTS.md');
-  const toolsPath = path.join(workspacePath, 'TOOLS.md');
-  if (!existsSync(soulPath)) await fs.writeFile(soulPath, DEFAULT_SOUL);
-  if (!existsSync(agentsPath)) await fs.writeFile(agentsPath, DEFAULT_AGENTS);
-  if (!existsSync(toolsPath)) await fs.writeFile(toolsPath, DEFAULT_TOOLS);
-}
-
-export function extractCurrentTask(agentsContent: string): string {
-  const match = agentsContent.match(/## Current Task\n([\s\S]*?)(?=\n##|$)/);
-  return match?.[1]?.trim() || '';
-}
-
-export function extractContext(agentsContent: string): string {
-  const match = agentsContent.match(/## Context\n([\s\S]*?)(?=\n##|$)/);
-  return match?.[1]?.trim() || '';
 }
 
 export async function writeSoul(content: string): Promise<void> {

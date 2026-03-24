@@ -42,19 +42,6 @@ export function emitToBuildingRoom(
   }
 }
 
-/**
- * Broadcast an event to all connected clients
- */
-export function broadcast(event: string, data: unknown): void {
-  const io = getIO();
-  if (io) {
-    io.emit(event, data);
-    console.log(`[Socket.io] Broadcasted ${event} to all clients`);
-  } else {
-    console.warn('[Socket.io] IO instance not available, broadcast failed:', event);
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Building-specific event emitters
 // ---------------------------------------------------------------------------

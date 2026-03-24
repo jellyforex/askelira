@@ -4,7 +4,6 @@
  * Future: route through OpenClaw gateway when sessions_spawn is exposed via HTTP
  */
 
-import { callClaude } from './openclaw-client';
 import { routeAgentCall } from './agent-router';
 import { albaPrompt, davidPrompt, vexPrompt, eliraPrompt } from './agent-prompts';
 import { readAllWorkspace } from './workspace/workspace-manager';
