@@ -4,6 +4,9 @@ import { authOptions } from '@/lib/auth';
 import { getTierForEmail } from '@/lib/tiers';
 import { sseHeaders } from '@/lib/progress-tracker';
 import { safeWaitUntil, getInternalBaseUrl } from '@/lib/internal-fetch';
+import { checkRateLimit } from '@/lib/rate-limiter';
+import { canStartBuild, recordBuildStart, recordBuildEnd } from '@/lib/build-queue';
+import { validateContent } from '@/lib/content-validator';
 
 export const maxDuration = 60;
 
@@ -38,12 +41,36 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // SD-013: Content validation
+    const questionCheck = validateContent(question, 'question');
+    if (!questionCheck.valid) {
+      return NextResponse.json({ error: questionCheck.reason }, { status: 400 });
+    }
+
     // Auth check
     const session = await getServerSession(authOptions);
     if (!session?.user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     const email = session.user.email;
+
+    // SD-011: Per-user build rate limit (5 builds/hour)
+    const userRateCheck = checkRateLimit(`build:${email}`, 5, 3600000);
+    if (!userRateCheck.allowed) {
+      return NextResponse.json(
+        { error: 'Build rate limit exceeded. Maximum 5 builds per hour.' },
+        { status: 429 },
+      );
+    }
+
+    // SD-014: Build queue concurrency check
+    const queueCheck = canStartBuild(email);
+    if (!queueCheck.allowed) {
+      return NextResponse.json(
+        { error: queueCheck.reason },
+        { status: 429 },
+      );
+    }
 
     // Tier + build limit check
     const usage = await getUserBuildData(email);
@@ -63,6 +90,9 @@ export async function POST(req: NextRequest) {
         { status: 429 },
       );
     }
+
+    // SD-014: Record build start
+    recordBuildStart(email);
 
     // Create a Goal and Floor for this build, then trigger the building loop
     const { createGoal, createFloor } = await import('@/lib/building-manager');

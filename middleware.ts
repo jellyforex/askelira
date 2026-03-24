@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+// SD-017: Request size limit (1MB)
+const MAX_REQUEST_SIZE = 1_048_576;
+
 const RATE_LIMIT_WINDOW = 60_000; // 1 minute
 // Local development: 1000 req/min, Production: 100 req/min
 const MAX_REQUESTS = process.env.NODE_ENV === 'development' ? 1000 : 100;
@@ -51,6 +54,15 @@ export function middleware(req: NextRequest) {
   // would let attackers bypass rate limiting by stripping forwarding headers)
   if (ip === '127.0.0.1' || ip === 'localhost' || ip === '::1') {
     return NextResponse.next();
+  }
+
+  // SD-017: Reject oversized requests
+  const contentLength = req.headers.get('content-length');
+  if (contentLength && parseInt(contentLength, 10) > MAX_REQUEST_SIZE) {
+    return NextResponse.json(
+      { error: 'Request body too large. Maximum 1MB.' },
+      { status: 413 },
+    );
   }
 
   ensureCleanup();

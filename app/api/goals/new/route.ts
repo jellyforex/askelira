@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limiter';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
+import { validateGoalText } from '@/lib/content-validator';
 
 export async function POST(req: NextRequest) {
   try {
@@ -33,9 +34,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (goalText.length > 5000) {
+    // SD-013: Content validation (replaces simple length check)
+    const contentCheck = validateGoalText(goalText);
+    if (!contentCheck.valid) {
       return NextResponse.json(
-        { error: 'goalText must be 5000 characters or fewer' },
+        { error: contentCheck.reason },
         { status: 400 },
       );
     }

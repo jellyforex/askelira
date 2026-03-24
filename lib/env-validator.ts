@@ -72,6 +72,25 @@ export function validateEnvironment(): ValidationResult {
     console.log('[EnvValidator] All environment variables present');
   }
 
+  // SD-020: API key rotation reminder
+  if (isProduction) {
+    const rotationVars = ['ANTHROPIC_API_KEY', 'CRON_SECRET', 'NEXTAUTH_SECRET'];
+    for (const varName of rotationVars) {
+      if (process.env[varName]) {
+        const val = process.env[varName]!;
+        // Warn if key looks like a placeholder or is suspiciously short
+        if (val.length < 16 || val.includes('...') || val === 'change-me') {
+          console.warn(
+            `[EnvValidator] ${varName} appears to be a placeholder — rotate it before production use`,
+          );
+        }
+      }
+    }
+    console.log(
+      '[EnvValidator] Reminder: Rotate API keys (ANTHROPIC_API_KEY, CRON_SECRET, NEXTAUTH_SECRET) at least every 90 days',
+    );
+  }
+
   return {
     valid: missing.length === 0,
     missing,
