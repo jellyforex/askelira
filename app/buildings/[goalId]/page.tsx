@@ -55,7 +55,7 @@ export default function BuildingPage() {
   const [showCheckoutBanner, setShowCheckoutBanner] = useState(false);
   const [pendingExpansions, setPendingExpansions] = useState<
     Array<{ name: string; description: string; successCondition: string }>
-  >([]);
+  >(building?.pendingExpansions ?? []);
   const [expandingFloor, setExpandingFloor] = useState<string | null>(null);
 
   // Phase 3: Terminal / file browser state
@@ -88,20 +88,12 @@ export default function BuildingPage() {
     }
   }, [searchParams, goalId]);
 
-  // Phase 10: Fetch pending expansions
+  // Phase 10: Sync pending expansions from hook data
   useEffect(() => {
-    if (!building || building.status !== 'building') return;
-    fetch(`/api/goals/${goalId}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.pendingExpansions && data.pendingExpansions.length > 0) {
-          setPendingExpansions(data.pendingExpansions);
-        }
-      })
-      .catch(() => {
-        // best-effort
-      });
-  }, [building?.status, goalId, building]);
+    if (building?.pendingExpansions && building.pendingExpansions.length > 0) {
+      setPendingExpansions(building.pendingExpansions);
+    }
+  }, [building?.pendingExpansions]);
 
   const handleApproveExpansion = useCallback(
     async (expansion: { name: string; description: string; successCondition: string }) => {

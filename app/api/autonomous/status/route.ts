@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
+import fs from 'fs/promises';
 import path from 'path';
 
 export async function GET() {
@@ -9,10 +9,9 @@ export async function GET() {
   let configured = false;
 
   try {
-    if (fs.existsSync(configPath)) {
-      config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      configured = true;
-    }
+    const raw = await fs.readFile(configPath, 'utf-8');
+    config = JSON.parse(raw);
+    configured = true;
   } catch {
     // config missing or malformed
   }
@@ -23,12 +22,11 @@ export async function GET() {
   let totalIterations = 0;
 
   try {
-    if (fs.existsSync(historyPath)) {
-      const history = JSON.parse(fs.readFileSync(historyPath, 'utf-8'));
-      totalIterations = history.length;
-      if (history.length > 0) {
-        lastRun = history[history.length - 1].timestamp;
-      }
+    const raw = await fs.readFile(historyPath, 'utf-8');
+    const history = JSON.parse(raw);
+    totalIterations = history.length;
+    if (history.length > 0) {
+      lastRun = history[history.length - 1].timestamp;
     }
   } catch {
     // history missing or malformed

@@ -35,6 +35,12 @@ export interface AgentActivity {
   timestamp: Date;
 }
 
+export interface PendingExpansion {
+  name: string;
+  description: string;
+  successCondition: string;
+}
+
 export interface BuildingState {
   goalId: string;
   goalText: string;
@@ -46,6 +52,7 @@ export interface BuildingState {
   stevenSuggestions: string[];
   heartbeatActive: boolean;
   lastHeartbeatAt: Date | null;
+  pendingExpansions: PendingExpansion[];
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +94,7 @@ interface ApiResponse {
   floors: ApiFloor[];
   recentLogs: ApiLog[];
   stevenSuggestions: string[];
+  pendingExpansions?: PendingExpansion[];
 }
 
 function parseApiResponse(data: ApiResponse): BuildingState {
@@ -115,8 +123,9 @@ function parseApiResponse(data: ApiResponse): BuildingState {
     })),
     isGoalMet: data.goal.status === 'goal_met',
     stevenSuggestions: data.stevenSuggestions ?? [],
-    heartbeatActive: false, // updated via socket
+    heartbeatActive: false, // updated via heartbeat fetch + socket
     lastHeartbeatAt: null,
+    pendingExpansions: data.pendingExpansions ?? [],
   };
 }
 
@@ -154,6 +163,25 @@ export function useBuildingState(goalId: string) {
   useEffect(() => {
     fetchBuilding();
   }, [fetchBuilding]);
+
+  // Fetch heartbeat status (separate endpoint, not included in goals API)
+  useEffect(() => {
+    if (!goalId) return;
+    fetch(`/api/heartbeat/${goalId}`)
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => {
+        if (!data?.status) return;
+        setBuilding((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            heartbeatActive: data.status.active ?? false,
+            lastHeartbeatAt: data.status.lastCheckedAt ? new Date(data.status.lastCheckedAt) : null,
+          };
+        });
+      })
+      .catch(() => { /* best-effort */ });
+  }, [goalId]);
 
   // Socket.io real-time updates
   useEffect(() => {

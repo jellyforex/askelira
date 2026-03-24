@@ -3,6 +3,7 @@
  * Returns server status and uptime
  */
 import { NextResponse } from 'next/server';
+import packageJson from '@/package.json';
 
 export async function GET() {
   return NextResponse.json(
@@ -11,7 +12,7 @@ export async function GET() {
       service: 'AskElira 2.1',
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
-      version: '2.1.0',
+      version: packageJson.version,
     },
     { status: 200 }
   );

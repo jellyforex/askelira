@@ -13,6 +13,13 @@ export const maxDuration = 300;
 
 export async function POST(request: Request) {
   try {
+    // Auth: require CRON_SECRET (same as daily cron route)
+    const authHeader = request.headers.get('authorization');
+    const cronSecret = process.env.CRON_SECRET;
+    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json().catch(() => ({}));
     const { SCRAPER_CATEGORIES } = await import('@/lib/scraper-categories');
     const { scrapeCategory } = await import('@/lib/daily-scraper');

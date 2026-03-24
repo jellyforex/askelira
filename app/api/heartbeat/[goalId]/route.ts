@@ -70,22 +70,20 @@ export async function POST(
   try {
     const goalId = params.goalId;
 
-    // Rate limit: 20/hour per goalId
-    if (goalId) {
-      const { checkRateLimit } = await import('@/lib/rate-limiter');
-      const rateCheck = checkRateLimit(`heartbeat:${goalId}`, 20, 3600000);
-      if (!rateCheck.allowed) {
-        return NextResponse.json(
-          { error: 'Rate limit exceeded. Try again later.' },
-          { status: 429 },
-        );
-      }
-    }
-
     if (!goalId) {
       return NextResponse.json(
         { error: 'Goal ID is required' },
         { status: 400 },
+      );
+    }
+
+    // Rate limit: 20/hour per goalId
+    const { checkRateLimit } = await import('@/lib/rate-limiter');
+    const rateCheck = checkRateLimit(`heartbeat:${goalId}`, 20, 3600000);
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Try again later.' },
+        { status: 429 },
       );
     }
 

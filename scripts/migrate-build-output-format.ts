@@ -20,20 +20,13 @@ async function main() {
     console.log('[Migration] DRY RUN mode — no database writes\n');
   }
 
-  // Dynamic import to avoid loading DB module when not needed
-  const { prisma } = await import('../lib/db');
+  const { sql } = await import('@vercel/postgres');
 
-  const floors = await prisma.floor.findMany({
-    where: {
-      buildOutput: { not: null },
-    },
-    select: {
-      id: true,
-      floorNumber: true,
-      name: true,
-      buildOutput: true,
-    },
-  });
+  const { rows: floors } = await sql`
+    SELECT id, floor_number AS "floorNumber", name, build_output AS "buildOutput"
+    FROM floors
+    WHERE build_output IS NOT NULL
+  `;
 
   console.log(`[Migration] Found ${floors.length} floor(s) with buildOutput\n`);
 
@@ -75,10 +68,9 @@ async function main() {
       if (dryRun) {
         console.log(`  [would migrate] Floor ${floor.floorNumber} "${floor.name}" — ${normalized.files.length} file(s)`);
       } else {
-        await prisma.floor.update({
-          where: { id: floor.id },
-          data: { buildOutput: newValue },
-        });
+        await sql`
+          UPDATE floors SET build_output = ${newValue} WHERE id = ${floor.id}
+        `;
         console.log(`  [migrated] Floor ${floor.floorNumber} "${floor.name}" — ${normalized.files.length} file(s)`);
       }
       migrated++;
@@ -89,8 +81,6 @@ async function main() {
   }
 
   console.log(`\n[Migration] Done: ${migrated} migrated, ${skipped} skipped, ${errors} errors`);
-
-  await prisma.$disconnect();
 }
 
 main().catch((err) => {

@@ -15,21 +15,19 @@ export async function POST(
   try {
     const { floorId } = params;
 
-    // Rate limit: 10/hour per floorId (raised from 3 to allow stall recovery restarts)
-    if (floorId) {
-      const rateCheck = checkRateLimit(`loop_start:${floorId}`, 10, 3600000);
-      if (!rateCheck.allowed) {
-        return NextResponse.json(
-          { error: 'Rate limit exceeded. Try again later.' },
-          { status: 429 },
-        );
-      }
-    }
-
     if (!floorId) {
       return NextResponse.json(
         { error: 'floorId is required' },
         { status: 400 },
+      );
+    }
+
+    // Rate limit: 10/hour per floorId (raised from 3 to allow stall recovery restarts)
+    const rateCheck = checkRateLimit(`loop_start:${floorId}`, 10, 3600000);
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Try again later.' },
+        { status: 429 },
       );
     }
 

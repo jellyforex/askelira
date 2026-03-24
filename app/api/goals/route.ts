@@ -9,46 +9,29 @@ export async function GET() {
     try {
       const { sql } = await import('@vercel/postgres');
 
-      // If authenticated, filter by customer email; otherwise return all goals
-      let rows;
-      if (session?.user?.email) {
-        const result = await sql`
-          SELECT
-            g.id,
-            g.customer_id AS "customerId",
-            g.goal_text AS "goalText",
-            g.status,
-            g.building_summary AS "buildingSummary",
-            g.created_at AS "createdAt",
-            g.updated_at AS "updatedAt",
-            COUNT(f.id)::int AS "floorCount",
-            COUNT(CASE WHEN f.status = 'live' THEN 1 END)::int AS "liveFloors"
-          FROM goals g
-          LEFT JOIN floors f ON f.goal_id = g.id
-          WHERE g.customer_id = ${session.user.email}
-          GROUP BY g.id
-          ORDER BY g.created_at DESC
-        `;
-        rows = result.rows;
-      } else {
-        const result = await sql`
-          SELECT
-            g.id,
-            g.customer_id AS "customerId",
-            g.goal_text AS "goalText",
-            g.status,
-            g.building_summary AS "buildingSummary",
-            g.created_at AS "createdAt",
-            g.updated_at AS "updatedAt",
-            COUNT(f.id)::int AS "floorCount",
-            COUNT(CASE WHEN f.status = 'live' THEN 1 END)::int AS "liveFloors"
-          FROM goals g
-          LEFT JOIN floors f ON f.goal_id = g.id
-          GROUP BY g.id
-          ORDER BY g.created_at DESC
-        `;
-        rows = result.rows;
+      // Require authentication -- unauthenticated users get empty list
+      if (!session?.user?.email) {
+        return NextResponse.json({ goals: [] });
       }
+
+      const result = await sql`
+        SELECT
+          g.id,
+          g.customer_id AS "customerId",
+          g.goal_text AS "goalText",
+          g.status,
+          g.building_summary AS "buildingSummary",
+          g.created_at AS "createdAt",
+          g.updated_at AS "updatedAt",
+          COUNT(f.id)::int AS "floorCount",
+          COUNT(CASE WHEN f.status = 'live' THEN 1 END)::int AS "liveFloors"
+        FROM goals g
+        LEFT JOIN floors f ON f.goal_id = g.id
+        WHERE g.customer_id = ${session.user.email}
+        GROUP BY g.id
+        ORDER BY g.created_at DESC
+      `;
+      const rows = result.rows;
 
       const goals = rows.map((r) => ({
         id: r.id,
