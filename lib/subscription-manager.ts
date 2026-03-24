@@ -175,7 +175,7 @@ export async function addFloorToSubscription(goalId: string): Promise<void> {
         items: [
           {
             id: recurringItem.id,
-            quantity: sub.floorsActive + 1, // +1 because DB was just incremented
+            quantity: sub.floorsActive, // DB was already incremented above
           },
         ],
       });

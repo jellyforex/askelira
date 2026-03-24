@@ -288,20 +288,31 @@ export async function chainNextStep(
   console.log(`[StepRunner] Chaining to ${nextStep} for floor ${floorId}: ${url}`);
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10_000);
+
     const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-cron-secret': secret,
       },
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!res.ok) {
       const text = await res.text();
       console.error(`[StepRunner] Chain call failed (${res.status}): ${text}`);
     }
   } catch (err) {
-    console.error(`[StepRunner] Chain call error:`, err);
+    const isAbort = err instanceof Error && err.name === 'AbortError';
+    if (isAbort) {
+      console.log(`[StepRunner] Chain call sent (timed out waiting for response -- expected on Vercel)`);
+    } else {
+      console.error(`[StepRunner] Chain call error:`, err);
+    }
   }
 }
 

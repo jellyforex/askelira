@@ -810,6 +810,8 @@ function countConsecutiveFailures(heartbeats: HeartbeatLog[]): number {
 // ============================================================
 
 const STALL_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+const STALL_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes between restart attempts per floor
+const stallRecoveryTimestamps = new Map<string, number>();
 
 /**
  * Check for floors stuck in researching/building/auditing with no recent
@@ -833,6 +835,12 @@ async function checkStalledFloors(goalId: string): Promise<void> {
 
   for (const floor of inProgressFloors) {
     try {
+      // Cooldown: skip if we already attempted a restart recently
+      const lastRestart = stallRecoveryTimestamps.get(floor.id);
+      if (lastRestart && (now - lastRestart) < STALL_COOLDOWN_MS) {
+        continue;
+      }
+
       const lastLogTime = await getLastAgentLogTime(floor.id);
 
       // If there's no log at all, use createdAt as the reference time
@@ -848,6 +856,9 @@ async function checkStalledFloors(goalId: string): Promise<void> {
         `[Heartbeat] STALL DETECTED: Floor ${floor.floorNumber} "${floor.name}" (${floor.id}) ` +
         `stuck in "${floor.status}" for ${Math.round(stalledMs / 1000)}s with no agent activity`,
       );
+
+      // Record the restart attempt timestamp before restarting
+      stallRecoveryTimestamps.set(floor.id, now);
 
       // Log the stall detection
       await logAgentAction({

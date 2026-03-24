@@ -16,13 +16,19 @@ export async function braveSearch(query: string, count = 5): Promise<BraveResult
   url.searchParams.set("q", query);
   url.searchParams.set("count", String(count));
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
+
   const res = await fetch(url.toString(), {
     headers: {
       "Accept": "application/json",
       "Accept-Encoding": "gzip",
       "X-Subscription-Token": apiKey,
     },
+    signal: controller.signal,
   });
+
+  clearTimeout(timeoutId);
 
   if (!res.ok) throw new Error(`Brave Search error: ${res.status} ${await res.text()}`);
 

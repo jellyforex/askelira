@@ -142,13 +142,18 @@ async function extractFromContent(
     // Cap content to avoid token overuse
     const trimmed = content.slice(0, 6000);
 
-    const raw = await routeAgentCall({
-      systemPrompt: EXTRACTION_PROMPT,
-      userMessage: `Category: ${category}\n\nWeb Content:\n${trimmed}`,
-      model: 'claude-sonnet-4-5-20250929',
-      maxTokens: 1024,
-      agentName: 'PatternExtractor',
-    });
+    const raw = await Promise.race([
+      routeAgentCall({
+        systemPrompt: EXTRACTION_PROMPT,
+        userMessage: `Category: ${category}\n\nWeb Content:\n${trimmed}`,
+        model: 'claude-sonnet-4-5-20250929',
+        maxTokens: 1024,
+        agentName: 'PatternExtractor',
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('PatternExtractor call timed out after 30s')), 30_000),
+      ),
+    ]);
 
     // Parse JSON — handle markdown fences and preamble text
     let text = raw.trim();
