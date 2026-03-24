@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getTierForEmail } from '@/lib/tiers';
 import { sseHeaders } from '@/lib/progress-tracker';
-import { waitUntil } from '@vercel/functions';
+import { safeWaitUntil, getInternalBaseUrl } from '@/lib/internal-fetch';
 
 export const maxDuration = 60;
 
@@ -118,22 +118,24 @@ export async function POST(req: NextRequest) {
           );
 
           // Start the building loop in the background
-          const baseUrl = process.env.VERCEL_URL
-            ? `https://${process.env.VERCEL_URL}`
-            : (process.env.NEXTAUTH_URL || '').trim() || 'http://localhost:3000';
+          const baseUrl = getInternalBaseUrl();
 
           const loopUrl = `${baseUrl}/api/loop/start/${floor.id}`;
 
           // Fire the building loop (don't wait for it)
           const buildPromise = (async () => {
             try {
+              const abortCtrl = new AbortController();
+              const timeout = setTimeout(() => abortCtrl.abort(), 10_000);
               const res = await fetch(loopUrl, {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
                   'x-cron-secret': process.env.CRON_SECRET || '',
                 },
+                signal: abortCtrl.signal,
               });
+              clearTimeout(timeout);
 
               if (!res.ok) {
                 console.error(`[API /build] Loop start failed: ${res.status}`);
@@ -141,11 +143,15 @@ export async function POST(req: NextRequest) {
                 console.log(`[API /build] Building loop started for floor ${floor.id}`);
               }
             } catch (err) {
-              console.error(`[API /build] Loop start error:`, err);
+              if (err instanceof Error && err.name === 'AbortError') {
+                console.log(`[API /build] Loop start fire-and-forget timed out (expected)`);
+              } else {
+                console.error(`[API /build] Loop start error:`, err);
+              }
             }
           })();
 
-          waitUntil(buildPromise);
+          safeWaitUntil(buildPromise);
 
           // Send completion event with goal/floor info so UI can poll for status
           controller.enqueue(

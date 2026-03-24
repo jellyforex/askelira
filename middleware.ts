@@ -47,8 +47,9 @@ export function middleware(req: NextRequest) {
     req.headers.get('x-real-ip') ??
     'unknown';
 
-  // Skip rate limiting for localhost
-  if (ip === '127.0.0.1' || ip === 'localhost' || ip === '::1' || ip === 'unknown') {
+  // Skip rate limiting for localhost only (never skip for 'unknown' — that
+  // would let attackers bypass rate limiting by stripping forwarding headers)
+  if (ip === '127.0.0.1' || ip === 'localhost' || ip === '::1') {
     return NextResponse.next();
   }
 

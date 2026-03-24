@@ -10,6 +10,28 @@ import fs from 'fs/promises';
 import { ensureWorkspace, getWorkspacePath } from './workspace-paths';
 import { normalizeDavidResult } from './shared-types';
 
+/**
+ * Sanitize a file name from LLM output to prevent path traversal.
+ * Strips directory separators and '..' components, then validates
+ * the resolved path stays inside the parent directory.
+ */
+function sanitizeFileName(name: string, parentDir: string): string | null {
+  // Remove null bytes and leading/trailing whitespace
+  const cleaned = name.replace(/\0/g, '').trim();
+  if (!cleaned) return null;
+
+  // Resolve the full path and verify it stays inside parentDir
+  const resolved = path.resolve(parentDir, cleaned);
+  const normalizedParent = path.resolve(parentDir) + path.sep;
+
+  if (!resolved.startsWith(normalizedParent) && resolved !== path.resolve(parentDir)) {
+    console.warn(`[WorkspaceSync] Blocked path traversal attempt: "${name}"`);
+    return null;
+  }
+
+  return resolved;
+}
+
 // ============================================================
 // Floor output writer
 // ============================================================
@@ -54,10 +76,10 @@ export async function writeFloorOutput(
         if (normalized.files.length > 0) {
           // Write each code file individually
           for (const file of normalized.files) {
-            const filePath = path.join(floorDir, file.name);
-            // Ensure subdirectories exist (e.g. "src/index.js")
-            await fs.mkdir(path.dirname(filePath), { recursive: true });
-            await fs.writeFile(filePath, file.content, 'utf-8');
+            const safePath = sanitizeFileName(file.name, floorDir);
+            if (!safePath) continue; // skip files with traversal attempts
+            await fs.mkdir(path.dirname(safePath), { recursive: true });
+            await fs.writeFile(safePath, file.content, 'utf-8');
           }
           // Write summary output.md
           const summaryContent = [
@@ -125,9 +147,10 @@ export async function writeFloorOutput(
           const automationSubDir = path.join(automationsDir, safeName);
           await fs.mkdir(automationSubDir, { recursive: true });
           for (const file of normalized.files) {
-            const filePath = path.join(automationSubDir, file.name);
-            await fs.mkdir(path.dirname(filePath), { recursive: true });
-            await fs.writeFile(filePath, file.content, 'utf-8');
+            const safePath = sanitizeFileName(file.name, automationSubDir);
+            if (!safePath) continue; // skip files with traversal attempts
+            await fs.mkdir(path.dirname(safePath), { recursive: true });
+            await fs.writeFile(safePath, file.content, 'utf-8');
           }
           wroteAutomationFiles = true;
         }

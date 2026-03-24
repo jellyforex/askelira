@@ -1,8 +1,15 @@
 import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import fs from 'fs/promises';
 import path from 'path';
 
 export async function GET() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const configPath = path.join(process.cwd(), '.autonomous-config.json');
 
   let config = null;
@@ -40,7 +47,7 @@ export async function GET() {
           loopInterval: config.loopInterval,
           agentCount: config.agentCount,
           maxIterations: config.maxIterations,
-          allowedPaths: config.allowedPaths,
+          // NOTE: allowedPaths intentionally omitted to avoid leaking server paths
         }
       : null,
     lastRun,

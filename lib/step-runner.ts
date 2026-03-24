@@ -273,6 +273,21 @@ function parseJSON<T>(raw: string, agentName: string): T {
   }
 }
 
+/**
+ * Safe JSON parse for DB-stored values that were previously serialized.
+ * Unlike parseJSON (for LLM output), this returns null on failure instead
+ * of throwing, because corrupted DB data should not crash a step.
+ */
+function safeParseDBJson<T>(raw: string | null | undefined, label: string): T | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch (err) {
+    console.error(`[StepRunner] Failed to parse DB-stored JSON for ${label}:`, err);
+    return null;
+  }
+}
+
 // Use shared getInternalBaseUrl from lib/internal-fetch.ts
 // (replaces local getBaseUrl that had VERCEL_URL empty-string bug)
 
@@ -757,7 +772,10 @@ export async function runVex1Step(floorId: string, iteration: number): Promise<S
     throw new Error(`Floor ${floorId} has no research output. Cannot run Vex Gate 1.`);
   }
 
-  const albaResult = JSON.parse(floor.researchOutput) as AlbaResult;
+  const albaResult = safeParseDBJson<AlbaResult>(floor.researchOutput, `Vex1:researchOutput:${floorId}`);
+  if (!albaResult) {
+    throw new Error(`Floor ${floorId} has corrupted research output. Cannot run Vex Gate 1.`);
+  }
 
   await updateFloorStatus(floorId, 'auditing');
   emitEvent(BUILDING_EVENTS.FLOOR_STATUS, { floorId, status: 'auditing', iteration, gate: 1 });
@@ -854,8 +872,14 @@ export async function runDavidStep(floorId: string, iteration: number): Promise<
     throw new Error(`Floor ${floorId} has no Vex Gate 1 report. Cannot run David.`);
   }
 
-  const albaResult = JSON.parse(floor.researchOutput) as AlbaResult;
-  const vex1Result = JSON.parse(floor.vexGate1Report) as VexGate1Result;
+  const albaResult = safeParseDBJson<AlbaResult>(floor.researchOutput, `David:researchOutput:${floorId}`);
+  if (!albaResult) {
+    throw new Error(`Floor ${floorId} has corrupted research output. Cannot run David.`);
+  }
+  const vex1Result = safeParseDBJson<VexGate1Result>(floor.vexGate1Report, `David:vexGate1Report:${floorId}`);
+  if (!vex1Result) {
+    throw new Error(`Floor ${floorId} has corrupted Vex Gate 1 report. Cannot run David.`);
+  }
   const buildingContext = await getBuildingContext(floor.goalId);
   const priorVex2Reports = await getPriorVex2Reports(floorId);
   const goalWithFloors = await getGoal(floor.goalId);
@@ -1074,8 +1098,15 @@ export async function runVex2Step(floorId: string, iteration: number): Promise<S
     throw new Error(`Floor ${floorId} missing research or build output. Cannot run Vex Gate 2.`);
   }
 
-  const albaResult = JSON.parse(floor.researchOutput) as AlbaResult;
-  const davidResult = normalizeDavidResult(JSON.parse(floor.buildOutput));
+  const albaResult = safeParseDBJson<AlbaResult>(floor.researchOutput, `Vex2:researchOutput:${floorId}`);
+  if (!albaResult) {
+    throw new Error(`Floor ${floorId} has corrupted research output. Cannot run Vex Gate 2.`);
+  }
+  const parsedBuild = safeParseDBJson<Record<string, unknown>>(floor.buildOutput, `Vex2:buildOutput:${floorId}`);
+  if (!parsedBuild) {
+    throw new Error(`Floor ${floorId} has corrupted build output. Cannot run Vex Gate 2.`);
+  }
+  const davidResult = normalizeDavidResult(parsedBuild);
 
   await updateFloorStatus(floorId, 'auditing');
   emitEvent(BUILDING_EVENTS.FLOOR_STATUS, { floorId, status: 'auditing', iteration, gate: 2 });
@@ -1187,7 +1218,11 @@ export async function runEliraStep(floorId: string, iteration: number): Promise<
     throw new Error(`Floor ${floorId} has no build output. Cannot run Elira review.`);
   }
 
-  const davidResult = normalizeDavidResult(JSON.parse(floor.buildOutput));
+  const parsedBuildElira = safeParseDBJson<Record<string, unknown>>(floor.buildOutput, `Elira:buildOutput:${floorId}`);
+  if (!parsedBuildElira) {
+    throw new Error(`Floor ${floorId} has corrupted build output. Cannot run Elira review.`);
+  }
+  const davidResult = normalizeDavidResult(parsedBuildElira);
   const goalWithFloors = await getGoal(floor.goalId);
   const goal: Goal = {
     id: goalWithFloors.id,
@@ -1291,7 +1326,11 @@ export async function runFinalizeStep(floorId: string, iteration: number): Promi
     throw new Error(`Floor ${floorId} has no build output. Cannot finalize.`);
   }
 
-  const davidResult = normalizeDavidResult(JSON.parse(floor.buildOutput));
+  const parsedBuildFinalize = safeParseDBJson<Record<string, unknown>>(floor.buildOutput, `Finalize:buildOutput:${floorId}`);
+  if (!parsedBuildFinalize) {
+    throw new Error(`Floor ${floorId} has corrupted build output. Cannot finalize.`);
+  }
+  const davidResult = normalizeDavidResult(parsedBuildFinalize);
   const goalWithFloors = await getGoal(floor.goalId);
   const goal: Goal = {
     id: goalWithFloors.id,

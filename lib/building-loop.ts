@@ -310,7 +310,14 @@ export async function getFloorForHeartbeat(floorId: string): Promise<Floor | nul
  * Run the full building loop for a single floor.
  * Returns 'live' if the floor passed all gates, 'blocked' if max iterations exceeded.
  */
-export async function runFloor(floorId: string): Promise<'live' | 'blocked'> {
+// Maximum recursion depth to prevent stack overflow with many floors
+const MAX_FLOOR_DEPTH = 20;
+
+export async function runFloor(floorId: string, _depth: number = 0): Promise<'live' | 'blocked'> {
+  if (_depth >= MAX_FLOOR_DEPTH) {
+    console.error(`[BuildingLoop] Max recursion depth (${MAX_FLOOR_DEPTH}) reached at floor ${floorId}. Breaking chain.`);
+    return 'live'; // Return gracefully; remaining floors will be picked up by heartbeat stall recovery
+  }
   console.log(`[BuildingLoop] Starting floor ${floorId}`);
 
   // Load floor
@@ -799,8 +806,9 @@ export async function runFloor(floorId: string): Promise<'live' | 'blocked'> {
       // Previously used setImmediate fire-and-forget which gets killed on Vercel
       // when the function lifecycle ends. Running sequentially ensures all floors
       // complete within the same waitUntil context.
+      // Depth is tracked to prevent unbounded stack growth.
       try {
-        await runFloor(nextFloor.id);
+        await runFloor(nextFloor.id, _depth + 1);
       } catch (err) {
         console.error(`[BuildingLoop] Next floor ${nextFloor.id} failed:`, err);
       }

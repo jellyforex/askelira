@@ -938,18 +938,49 @@ async function checkExpansionOpportunity(goalId: string): Promise<void> {
     return; // Not enough suggestions to detect a pattern
   }
 
-  // Group and count suggestions by normalized text
-  const counts = new Map<string, number>();
-  for (const s of recentSuggestions) {
-    const normalized = s.toLowerCase().trim();
-    counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+  // Group suggestions by similarity using keyword overlap.
+  // Exact string matching after lowercase/trim is too strict -- Steven's
+  // suggestions will always vary slightly in wording. We use word-set
+  // overlap (Jaccard similarity >= 0.6) to cluster similar suggestions.
+  function getWords(text: string): Set<string> {
+    return new Set(
+      text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 2)
+    );
   }
 
-  // Find suggestions appearing 3+ times
+  function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+    if (a.size === 0 && b.size === 0) return 1;
+    let intersection = 0;
+    for (const w of a) {
+      if (b.has(w)) intersection++;
+    }
+    return intersection / (a.size + b.size - intersection);
+  }
+
+  // Cluster suggestions: group similar ones together
+  const clusters: Array<{ representative: string; count: number }> = [];
+  const wordSets = recentSuggestions.map(s => ({ text: s, words: getWords(s) }));
+
+  for (const item of wordSets) {
+    let matched = false;
+    for (const cluster of clusters) {
+      const clusterWords = getWords(cluster.representative);
+      if (jaccardSimilarity(item.words, clusterWords) >= 0.6) {
+        cluster.count++;
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      clusters.push({ representative: item.text, count: 1 });
+    }
+  }
+
+  // Find clusters appearing 3+ times
   const repeatedSuggestions: string[] = [];
-  for (const [text, count] of counts) {
-    if (count >= 3) {
-      repeatedSuggestions.push(text);
+  for (const cluster of clusters) {
+    if (cluster.count >= 3) {
+      repeatedSuggestions.push(cluster.representative);
     }
   }
 

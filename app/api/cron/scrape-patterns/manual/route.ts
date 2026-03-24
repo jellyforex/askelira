@@ -16,7 +16,11 @@ export async function POST(request: Request) {
     // Auth: require CRON_SECRET (same as daily cron route)
     const authHeader = request.headers.get('authorization');
     const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    if (!cronSecret) {
+      console.error('[Manual Scrape] CRON_SECRET not set — rejecting request');
+      return NextResponse.json({ error: 'CRON_SECRET not configured' }, { status: 500 });
+    }
+    if (authHeader !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -30,7 +34,8 @@ export async function POST(request: Request) {
     if (body.categories && Array.isArray(body.categories)) {
       selected = body.categories;
     } else {
-      const count = body.count ?? 3;
+      const rawCount = typeof body.count === 'number' ? body.count : 3;
+      const count = Math.max(1, Math.min(rawCount, 20)); // Cap at 20 categories max
       const shuffled = [...SCRAPER_CATEGORIES].sort(() => Math.random() - 0.5);
       selected = shuffled.slice(0, count);
     }
