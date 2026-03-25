@@ -63,6 +63,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [apiKeyCopied, setApiKeyCopied] = useState(false);
+  const [apiKeyVisible, setApiKeyVisible] = useState(false);
   const [activeSection, setActiveSection] = useState('profile');
   const [isMobile, setIsMobile] = useState(false);
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -483,8 +484,18 @@ export default function SettingsPage() {
                 letterSpacing: '0.025em',
               }}
             >
-              {maskedKey(email || '')}
+              {apiKeyVisible ? (email || '') : maskedKey(email || '')}
             </div>
+            <button
+              onClick={() => setApiKeyVisible(!apiKeyVisible)}
+              style={{
+                ...btnOutline,
+                minWidth: '4rem',
+                textAlign: 'center',
+              }}
+            >
+              {apiKeyVisible ? 'Hide' : 'Show'}
+            </button>
             <button
               onClick={copyApiKey}
               style={{
