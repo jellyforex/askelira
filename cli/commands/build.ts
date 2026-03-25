@@ -16,7 +16,8 @@ import {
   boxDivider,
 } from '../lib/format';
 import { runPhaseZero, quickValidation } from '../lib/phase-zero';
-import { getApiKey, getEmail, getLLMApiKey } from '../lib/auth';
+import { getApiKey, getEmail, getLLMApiKey, getGatewayUrl, getGatewayToken, getGatewayMode } from '../lib/auth';
+import { testGatewayConnection } from './gateway';
 
 /**
  * Feature 45: Run a single agent in isolation with user-provided prompt.
@@ -85,6 +86,41 @@ export async function buildCommand(goalText?: string, options?: { dryRun?: boole
     await runSingleAgent(options.agent, prompt);
     return;
   }
+  // Gateway reachability check
+  const gwMode = getGatewayMode();
+  if (gwMode === 'gateway' || gwMode === 'gateway-only') {
+    const gwUrl = getGatewayUrl();
+    const gwToken = getGatewayToken();
+    if (gwUrl) {
+      try {
+        const gwResult = await testGatewayConnection(gwUrl, gwToken);
+        if (gwResult.connected) {
+          console.log(chalk.green(`  Gateway connected (${gwResult.latencyMs}ms, session: ${gwResult.sessionId || 'n/a'})`));
+        } else if (gwMode === 'gateway-only') {
+          console.log(chalk.red(`  Gateway not connected. Run: openclaw gateway start`));
+          console.log(chalk.red(`  Error: ${gwResult.error || 'unreachable'}`));
+          process.exitCode = 1;
+          return;
+        } else {
+          console.log(chalk.yellow(`  Gateway unreachable — will use direct API`));
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (gwMode === 'gateway-only') {
+          console.log(chalk.red(`  Gateway not connected. Run: openclaw gateway start`));
+          console.log(chalk.red(`  Error: ${msg}`));
+          process.exitCode = 1;
+          return;
+        }
+        console.log(chalk.yellow(`  Gateway check failed — will use direct API`));
+      }
+    } else if (gwMode === 'gateway-only') {
+      console.log(chalk.red(`  Gateway not connected. No OPENCLAW_GATEWAY_URL configured.`));
+      process.exitCode = 1;
+      return;
+    }
+  }
+
   console.log('');
   console.log(chalk.bold('  AskElira Build Wizard'));
   console.log(chalk.gray('  Create a new automation from scratch'));

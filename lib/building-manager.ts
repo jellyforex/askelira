@@ -177,7 +177,7 @@ export async function getGoal(
   goalId: string,
 ): Promise<Goal & { floors: Floor[] }> {
   const { rows: goalRows } = await sql`
-    SELECT * FROM goals WHERE id = ${goalId} AND deleted_at IS NULL
+    SELECT * FROM goals WHERE id = ${goalId}
   `;
 
   if (goalRows.length === 0) {

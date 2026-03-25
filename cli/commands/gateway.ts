@@ -57,14 +57,14 @@ export async function gatewayStatusCommand(): Promise<void> {
   console.log('');
 }
 
-interface GatewayTestResult {
+export interface GatewayTestResult {
   connected: boolean;
   latencyMs: number;
   sessionId?: string;
   error?: string;
 }
 
-async function testGatewayConnection(url: string, token: string): Promise<GatewayTestResult> {
+export async function testGatewayConnection(url: string, token: string): Promise<GatewayTestResult> {
   return new Promise((resolve) => {
     const startTime = Date.now();
     const connectId = `status_${Date.now().toString(36)}`;
