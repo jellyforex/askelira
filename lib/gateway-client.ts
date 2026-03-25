@@ -147,6 +147,13 @@ export class GatewayClient extends EventEmitter {
   private shouldReconnect = true;
   private agentListeners = new Map<string, (msg: any) => void>();
 
+  // Gateway hardening: pong timeout + session tracking
+  private lastPongAt = 0;
+  private pongTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private previousSessionId: string | null = null;
+  private connectStartedAt = 0;
+  private static readonly PONG_TIMEOUT_MS = 5000;
+
   private readonly config: Required<GatewayClientConfig>;
 
   // Metrics
@@ -186,7 +193,7 @@ export class GatewayClient extends EventEmitter {
       url: config.url,
       token: config.token,
       requestTimeoutMs: config.requestTimeoutMs ?? 300000,
-      heartbeatIntervalMs: config.heartbeatIntervalMs ?? 30000,
+      heartbeatIntervalMs: config.heartbeatIntervalMs ?? 15000,
       maxReconnectDelayMs: config.maxReconnectDelayMs ?? 30000,
       circuitBreakerThreshold: config.circuitBreakerThreshold ?? 3,
       circuitBreakerWindowMs: config.circuitBreakerWindowMs ?? 60000,
@@ -199,10 +206,15 @@ export class GatewayClient extends EventEmitter {
   // ============================================================
 
   async connect(): Promise<void> {
-    if (this.connected || this.shuttingDown) return;
+    if (this.connected) return;
+    // Reset shutdown/reconnect flags so a fresh connect() always works,
+    // even after a prior disconnect() or 1008 protocol violation.
+    this.shuttingDown = false;
+    this.shouldReconnect = true;
 
     return new Promise<void>((resolve, reject) => {
       const wsUrl = this.config.url;
+      this.connectStartedAt = Date.now();
       console.log(`[Gateway] Connecting to ${wsUrl}...`);
 
       try {
@@ -272,6 +284,7 @@ export class GatewayClient extends EventEmitter {
       this.ws.on('close', (code, reason) => {
         const wasConnected = this.connected;
         this.connected = false;
+        this.previousSessionId = this.sessionId;
         this.sessionId = null;
         this.stopHeartbeat();
         clearTimeout(connectTimeout);
@@ -299,6 +312,14 @@ export class GatewayClient extends EventEmitter {
           this.scheduleReconnect();
         } else if (!wasConnected) {
           reject(new Error(`Gateway connection closed (code=${code})`));
+        }
+      });
+
+      this.ws.on('pong', () => {
+        this.lastPongAt = Date.now();
+        if (this.pongTimeoutTimer) {
+          clearTimeout(this.pongTimeoutTimer);
+          this.pongTimeoutTimer = null;
         }
       });
 
@@ -362,9 +383,13 @@ export class GatewayClient extends EventEmitter {
       this.reconnectAttempts = 0;
       this.reconnecting = false;
 
-      console.log(`[Gateway] Connected (sessionId=${this.sessionId})`);
+      const connectLatencyMs = Date.now() - this.connectStartedAt;
+      console.log(`[Gateway] Connected (sessionId=${this.sessionId}, latency=${connectLatencyMs}ms)`);
+      if (this.previousSessionId) {
+        console.log(`[Gateway] Session transition: ${this.previousSessionId} -> ${this.sessionId}`);
+      }
       this.emit(GATEWAY_EVENTS?.GATEWAY_CONNECTED ?? 'gateway:connected', { sessionId: this.sessionId });
-      notify(`🔗 Gateway *connected* (session: \`${this.sessionId}\`)`);
+      notify(`🔗 AskElira online — gateway latency: ${connectLatencyMs}ms, session: \`${this.sessionId}\``);
 
       this.startHeartbeat();
       clearConnectTimeout?.();
@@ -383,6 +408,11 @@ export class GatewayClient extends EventEmitter {
 
     // Handle pong / heartbeat response
     if (msg.type === 'pong' || (msg.type === 'res' && (msg as any).method === 'ping')) {
+      this.lastPongAt = Date.now();
+      if (this.pongTimeoutTimer) {
+        clearTimeout(this.pongTimeoutTimer);
+        this.pongTimeoutTimer = null;
+      }
       return;
     }
 
@@ -496,6 +526,11 @@ export class GatewayClient extends EventEmitter {
   async invokeAgent(params: InvokeAgentParams): Promise<string> {
     const startTime = Date.now();
     const label = params.agentName || 'Agent';
+
+    if (!this.isSessionActive()) {
+      throw new Error(`[Gateway] No active session for ${label}. Status: ${this.getStatus()}`);
+    }
+
     const idempotencyKey = `${label}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
     // Feature 21: Use per-agent timeout if available
@@ -620,7 +655,17 @@ export class GatewayClient extends EventEmitter {
     this.heartbeatTimer = setInterval(() => {
       if (this.connected && this.ws?.readyState === WebSocket.OPEN) {
         try {
-          this.send({ type: 'req', id: this.generateId(), method: 'ping' } as unknown as GatewayMessage);
+          // Use WebSocket native ping instead of protocol-level 'ping' method
+          // (OpenClaw gateway does not support method: 'ping')
+          this.ws.ping();
+
+          // Set pong timeout — if no pong in 5s, force-close to trigger reconnect
+          this.pongTimeoutTimer = setTimeout(() => {
+            console.warn(`[Gateway] Pong not received within ${GatewayClient.PONG_TIMEOUT_MS}ms — force-closing`);
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+              this.ws.close(4000, 'Pong timeout');
+            }
+          }, GatewayClient.PONG_TIMEOUT_MS);
         } catch {
           // Heartbeat failure handled by error/close events
         }
@@ -632,6 +677,10 @@ export class GatewayClient extends EventEmitter {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
+    }
+    if (this.pongTimeoutTimer) {
+      clearTimeout(this.pongTimeoutTimer);
+      this.pongTimeoutTimer = null;
     }
   }
 
@@ -736,6 +785,10 @@ export class GatewayClient extends EventEmitter {
     return { ...this.metrics };
   }
 
+  isSessionActive(): boolean {
+    return this.connected && this.sessionId !== null;
+  }
+
   getSessionId(): string | null {
     return this.sessionId;
   }
@@ -759,6 +812,8 @@ export class GatewayClient extends EventEmitter {
     recentLatencyMs: number;
     sessionId: string | null;
     activeSessions: number;
+    lastPongAt: number;
+    sessionActive: boolean;
   } {
     const avgLatency = this.latencyWindow.length > 0
       ? Math.round(this.latencyWindow.reduce((a, b) => a + b, 0) / this.latencyWindow.length)
@@ -769,6 +824,8 @@ export class GatewayClient extends EventEmitter {
       recentLatencyMs: avgLatency,
       sessionId: this.sessionId,
       activeSessions: this.activeSessions.size,
+      lastPongAt: this.lastPongAt,
+      sessionActive: this.isSessionActive(),
     };
   }
 }

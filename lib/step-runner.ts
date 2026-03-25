@@ -20,7 +20,7 @@ import {
 } from './agent-prompts';
 
 import { callClaudeWithTools, callClaudeWithSystem } from './openclaw-client';
-import { routeAgentCall } from './agent-router';
+import { routeAgentCall, ensureGatewayReady } from './agent-router';
 import { runOpenResearch, type OpenResearchResult } from './autoresearch';
 import { webSearch, type SearchResult, type WebSearchOptions } from './web-search';
 import { getPersonalContext, type PersonalContext } from './personal-context';
@@ -163,8 +163,8 @@ async function routeAgentCallWithRetry(
   } catch (err) {
     const category = classifyError(err);
     const msg = err instanceof Error ? err.message : String(err);
-    rlog(floorId, `[RETRY] ${params.agentName} failed (${category}): ${msg.slice(0, 200)}. Retrying in 30s...`);
-    await new Promise((resolve) => setTimeout(resolve, 30000));
+    rlog(floorId, `[RETRY] ${params.agentName} failed (${category}): ${msg.slice(0, 200)}. Retrying in 5s...`);
+    await new Promise((resolve) => setTimeout(resolve, 5000));
     return routeAgentCall(params);
   }
 }
@@ -428,6 +428,15 @@ export async function runAlbaStep(floorId: string, iteration: number): Promise<S
   if (iteration <= 1) {
     const floor = await getFloor(floorId);
     if (floor) startPipelineRun(floor.goalId, floorId);
+
+    // Gateway pre-flight check (iteration 1 only)
+    try {
+      await ensureGatewayReady(3);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      rlog(floorId, `Gateway pre-flight failed: ${msg}`);
+      return { step: 'alba', success: false, nextStep: 'done', message: `Gateway not available: ${msg}`, floorId, iteration };
+    }
   }
   setCurrentAgent(floorId, 'Alba', 'alba');
   rlog(floorId, `Alba research for floor ${floorId}, iteration ${iteration}`);
@@ -1391,6 +1400,9 @@ export async function runVex2Step(floorId: string, iteration: number): Promise<S
 export async function runEliraStep(floorId: string, iteration: number): Promise<StepResult> {
   setCurrentAgent(floorId, 'Elira', 'elira');
   rlog(floorId, `Elira review for floor ${floorId}, iteration ${iteration}`);
+  if (await checkTimeout(floorId, (await getFloor(floorId))?.goalId || '')) {
+    return { step: 'elira', success: false, nextStep: 'done', message: 'Pipeline timed out', floorId, iteration };
+  }
   if (checkCancelled(floorId)) {
     return { step: 'elira', success: false, nextStep: 'done', message: 'Build cancelled', floorId, iteration };
   }

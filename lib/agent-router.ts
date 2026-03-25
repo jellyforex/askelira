@@ -62,6 +62,17 @@ export function getRoutingMetrics() {
   return { ...routingMetrics };
 }
 
+/** Reset routing metrics — call at the start of each build to get per-build stats. */
+export function resetRoutingMetrics(): void {
+  routingMetrics.gatewayRequests = 0;
+  routingMetrics.directRequests = 0;
+  routingMetrics.gatewaySuccesses = 0;
+  routingMetrics.gatewayFailures = 0;
+  routingMetrics.directSuccesses = 0;
+  routingMetrics.directFailures = 0;
+  routingMetrics.fallbacksUsed = 0;
+}
+
 // Feature 29: Save routing metrics to DB per build
 export async function saveRoutingMetrics(goalId: string): Promise<void> {
   try {
@@ -75,6 +86,36 @@ export async function saveRoutingMetrics(goalId: string): Promise<void> {
   } catch {
     // best-effort
   }
+}
+
+// ============================================================
+// Pre-flight gateway readiness check
+// ============================================================
+
+export async function ensureGatewayReady(maxRetries = 3): Promise<void> {
+  const mode = getRoutingMode();
+  if (mode === 'direct') return;
+
+  const client = getGatewayClient();
+  if (!client) {
+    if (mode === 'gateway-only') {
+      throw new Error('[AgentRouter] Gateway not configured but AGENT_ROUTING_MODE=gateway-only');
+    }
+    return;
+  }
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    if (client.isHealthy()) return;
+    console.log(`[AgentRouter] Gateway pre-flight: attempt ${attempt}/${maxRetries}`);
+    try { await connectGateway(); } catch { /* will retry */ }
+    if (client.isHealthy()) return;
+    if (attempt < maxRetries) await new Promise(r => setTimeout(r, 2000));
+  }
+
+  if (mode === 'gateway-only') {
+    throw new Error(`[AgentRouter] Gateway pre-flight failed after ${maxRetries} attempts`);
+  }
+  console.warn('[AgentRouter] Gateway pre-flight failed, builds will use direct API');
 }
 
 // ============================================================

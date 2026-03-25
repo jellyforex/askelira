@@ -16,7 +16,7 @@ import {
 } from './agent-prompts';
 
 import { callClaudeWithTools, callClaudeWithSystem } from './openclaw-client';
-import { routeAgentCall } from './agent-router';
+import { routeAgentCall, ensureGatewayReady } from './agent-router';
 
 import {
   type Floor,
@@ -380,7 +380,19 @@ export async function runFloor(floorId: string, _depth: number = 0): Promise<'li
     // Pattern detection is best-effort — never blocks the loop
   }
 
-  // Main loop
+  // Gateway pre-flight check
+  try {
+    await ensureGatewayReady(3);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[BuildingLoop] Gateway pre-flight failed: ${msg}`);
+    notify(`[BuildingLoop] Gateway pre-flight failed for floor ${floor.floorNumber}: ${msg}`);
+    releaseGoalLock(floor.goalId);
+    throw new Error(`Gateway not available: ${msg}`);
+  }
+
+  // Main loop — wrapped in try/finally to guarantee goal lock release
+  try {
   for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     console.log(`[BuildingLoop] Floor ${floor.floorNumber} "${floor.name}" — iteration ${iteration}/${MAX_ITERATIONS}`);
 
@@ -520,7 +532,7 @@ export async function runFloor(floorId: string, _depth: number = 0): Promise<'li
     const davidRaw = await routeAgentCall({
       systemPrompt: DAVID_BUILD_PROMPT,
       userMessage: davidMessage,
-      model: 'claude-opus-4-5',
+      model: 'claude-opus-4-6',
       maxTokens: 8192,
       agentName: 'David',
     });
@@ -807,6 +819,9 @@ export async function runFloor(floorId: string, _depth: number = 0): Promise<'li
       // best-effort — workspace sync never blocks the loop
     }
 
+    // Release goal lock BEFORE recursive call so the next floor can acquire it
+    releaseGoalLock(floor.goalId);
+
     // Check if there is a next floor
     const nextFloor = await getNextFloor(floor.goalId, floor.floorNumber);
 
@@ -854,8 +869,7 @@ export async function runFloor(floorId: string, _depth: number = 0): Promise<'li
     return 'live';
   }
 
-  // Max iterations exceeded — release goal lock (Feature 6)
-  releaseGoalLock(floor.goalId);
+  // Max iterations exceeded
   console.error(`[BuildingLoop] Floor ${floorId} exceeded max iterations (${MAX_ITERATIONS}). Marking blocked.`);
   notify(`🚫 *Floor ${floor.floorNumber}* "${floor.name}" *blocked* — exceeded ${MAX_ITERATIONS} iterations`);
   await updateFloorStatus(floorId, 'blocked');
@@ -877,4 +891,9 @@ export async function runFloor(floorId: string, _depth: number = 0): Promise<'li
   });
 
   return 'blocked';
+
+  } finally {
+    // Guarantee goal lock release on any exit path (success, error, or max iterations)
+    releaseGoalLock(floor.goalId);
+  }
 }
