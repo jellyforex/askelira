@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { authenticate } from '@/lib/auth-helpers';
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { goalId: string } },
 ) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    // Unified auth: support both NextAuth session (web) and header-based auth (CLI)
+    const auth = await authenticate(req);
+    if (!auth.authenticated || !auth.customerId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -28,7 +28,7 @@ export async function GET(
       // Verify ownership
       try {
         const goal = await getGoal(goalId);
-        if (goal.customerId !== session.user.email) {
+        if (goal.customerId !== auth.customerId) {
           return NextResponse.json({ error: 'Goal not found' }, { status: 404 });
         }
       } catch {
@@ -116,7 +116,7 @@ export async function POST(
       // Verify ownership
       try {
         const goal = await getGoalForPost(goalId);
-        if (goal.customerId !== session.user.email) {
+        if (goal.customerId !== auth.customerId) {
           return NextResponse.json({ error: 'Goal not found' }, { status: 404 });
         }
       } catch {

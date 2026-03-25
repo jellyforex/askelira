@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limiter';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { authenticate } from '@/lib/auth-helpers';
 import { validateGoalText } from '@/lib/content-validator';
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    // Unified auth: support both NextAuth session (web) and header-based auth (CLI)
+    const auth = await authenticate(req);
+    if (!auth.authenticated || !auth.customerId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -23,8 +23,8 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const { goalText, customerContext } = body;
-    // Use authenticated email as customerId to prevent impersonation
-    const customerId = session.user.email;
+    // Use authenticated customerId to prevent impersonation
+    const customerId = auth.customerId;
 
     // Validate required fields
     if (!goalText || typeof goalText !== 'string' || goalText.trim().length === 0) {

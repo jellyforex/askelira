@@ -1,16 +1,16 @@
-import { NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { authenticate } from '@/lib/auth-helpers';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    // Unified auth: support both NextAuth session (web) and header-based auth (CLI)
+    const auth = await authenticate(req);
 
     try {
       const { sql } = await import('@vercel/postgres');
 
       // Require authentication -- unauthenticated users get empty list
-      if (!session?.user?.email) {
+      if (!auth.authenticated || !auth.customerId) {
         return NextResponse.json({ goals: [] });
       }
 
@@ -27,7 +27,7 @@ export async function GET() {
           COUNT(CASE WHEN f.status = 'live' THEN 1 END)::int AS "liveFloors"
         FROM goals g
         LEFT JOIN floors f ON f.goal_id = g.id
-        WHERE g.customer_id = ${session.user.email}
+        WHERE g.customer_id = ${auth.customerId}
           AND g.deleted_at IS NULL
         GROUP BY g.id
         ORDER BY g.created_at DESC

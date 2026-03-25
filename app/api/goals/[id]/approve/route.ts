@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { authenticate } from '@/lib/auth-helpers';
 import { BUILDING_EVENTS } from '@/lib/events';
 import { safeWaitUntil, getInternalBaseUrl, fetchWithRetry } from '@/lib/internal-fetch';
 
@@ -13,12 +12,13 @@ export const maxDuration = 60;
 const STEP_BUDGET_MS = 55_000;
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } },
 ) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    // Unified auth: support both NextAuth session (web) and header-based auth (CLI)
+    const auth = await authenticate(req);
+    if (!auth.authenticated || !auth.customerId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -53,7 +53,7 @@ export async function POST(
       }
 
       // Verify ownership
-      if (goal.customerId !== session.user.email) {
+      if (goal.customerId !== auth.customerId) {
         return NextResponse.json(
           { error: 'You do not own this goal' },
           { status: 403 },
