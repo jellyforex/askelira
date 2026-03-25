@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit } from '@/lib/rate-limiter';
 import { authenticate } from '@/lib/auth-helpers';
+import { logger } from '@/lib/logger';
 
 export const maxDuration = 60; // Elira planning calls can take 30-60s
 
@@ -8,14 +9,18 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } },
 ) {
+  const startTime = Date.now();
+  const goalId = params.id;
+
   try {
+    logger.info('Plan request received', { goalId });
+
     // Unified auth: support both NextAuth session (web) and header-based auth (CLI)
     const auth = await authenticate(req);
     if (!auth.authenticated || !auth.customerId) {
+      logger.warn('Unauthorized plan request', { goalId });
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-
-    const goalId = params.id;
 
     if (!goalId) {
       return NextResponse.json(
@@ -66,6 +71,7 @@ export async function POST(
 
       // Idempotent: if floors already exist, return existing plan
       if (goal.floors && goal.floors.length > 0) {
+        logger.info('Returning cached plan', { goalId: goal.id, floorCount: goal.floors.length });
         return NextResponse.json({
           goalId: goal.id,
           buildingSummary: goal.buildingSummary ?? 'Plan already exists',
@@ -103,6 +109,14 @@ export async function POST(
             await updateGoalSummary(goal.id, template.buildingSummary);
             await incrementTemplateUseCount(template.id);
 
+            const duration = Date.now() - startTime;
+            logger.info('Plan generated from template', {
+              goalId: goal.id,
+              templateId: template.id,
+              floorCount: template.floorBlueprints.length,
+              duration,
+            });
+
             return NextResponse.json({
               goalId: goal.id,
               buildingSummary: template.buildingSummary,
@@ -129,6 +143,13 @@ export async function POST(
 
       const result = await designBuilding(goal.id, goal.goalText, contextStr);
 
+      const duration = Date.now() - startTime;
+      logger.info('Plan generated successfully', {
+        goalId: goal.id,
+        floorCount: result.floorCount,
+        duration,
+      });
+
       return NextResponse.json({
         goalId: goal.id,
         buildingSummary: result.buildingSummary,
@@ -144,11 +165,49 @@ export async function POST(
         })),
       });
     } catch (dbErr: unknown) {
-      console.error('[API /goals/[id]/plan] Error:', dbErr instanceof Error ? dbErr.message : dbErr);
-      return NextResponse.json({ error: 'Failed to plan goal' }, { status: 500 });
+      const duration = Date.now() - startTime;
+      const errMsg = dbErr instanceof Error ? dbErr.message : String(dbErr);
+
+      logger.error('Plan generation failed', {
+        goalId,
+        duration,
+        errorType: dbErr instanceof Error ? dbErr.name : 'Unknown',
+      }, dbErr instanceof Error ? dbErr : undefined);
+
+      // Provide user-friendly error messages based on error type
+      let userMessage = 'Failed to plan goal';
+      if (errMsg.includes('ANTHROPIC_API_KEY')) {
+        userMessage = 'AI service not configured. Please contact support.';
+      } else if (errMsg.includes('Anthropic API error')) {
+        userMessage = 'AI service unavailable. Please try again in a moment.';
+      } else if (errMsg.includes('database') || errMsg.includes('postgres')) {
+        userMessage = 'Database error. Please try again or contact support.';
+      } else if (errMsg.includes('timeout') || errMsg.includes('ETIMEDOUT')) {
+        userMessage = 'Request timed out. Please try again.';
+      } else if (errMsg.includes('network') || errMsg.includes('ECONNREFUSED')) {
+        userMessage = 'Network error. Please check your connection and try again.';
+      } else if (errMsg.includes('rate limit')) {
+        userMessage = 'Too many requests. Please wait a moment and try again.';
+      }
+
+      return NextResponse.json({
+        error: userMessage,
+        details: process.env.NODE_ENV === 'development' ? errMsg : undefined
+      }, { status: 500 });
     }
   } catch (err: unknown) {
-    console.error('[API /goals/[id]/plan]', err instanceof Error ? err.message : err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    const duration = Date.now() - startTime;
+    const errMsg = err instanceof Error ? err.message : String(err);
+
+    logger.error('Plan request failed (outer catch)', {
+      goalId,
+      duration,
+      errorType: err instanceof Error ? err.name : 'Unknown',
+    }, err instanceof Error ? err : undefined);
+
+    return NextResponse.json({
+      error: 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? errMsg : undefined
+    }, { status: 500 });
   }
 }

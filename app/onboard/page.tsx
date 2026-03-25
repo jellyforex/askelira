@@ -311,7 +311,18 @@ export default function OnboardPage() {
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: 'Request failed' }));
-        throw new Error(body.error || `HTTP ${res.status}`);
+        let errorMsg = body.error || `HTTP ${res.status}`;
+
+        // Add helpful context for common errors
+        if (res.status === 401) {
+          errorMsg = 'Please sign in to continue building your automation.';
+        } else if (res.status === 429) {
+          errorMsg = 'Too many requests. Please wait a moment and try again.';
+        } else if (res.status === 500 || res.status === 502 || res.status === 503) {
+          errorMsg = `${errorMsg}. Our AI is working hard — please try again in a few moments.`;
+        }
+
+        throw new Error(errorMsg);
       }
 
       const data = await res.json();
@@ -345,8 +356,22 @@ export default function OnboardPage() {
 
       setFloorPlan(plan);
     } catch (err: unknown) {
-      const msg =
-        err instanceof Error ? err.message : 'Failed to generate plan';
+      let msg = 'Failed to generate plan';
+
+      if (err instanceof Error) {
+        msg = err.message;
+
+        // Add user-friendly context for network errors
+        if (err.name === 'TypeError' && err.message.includes('fetch')) {
+          msg = 'Network error. Please check your connection and try again.';
+        } else if (err.message.includes('timeout')) {
+          msg = 'The request took too long. Please try again.';
+        } else if (err.message.includes('abort')) {
+          msg = 'Request was cancelled. Please try again.';
+        }
+      }
+
+      console.error('[Onboard] generatePlan error:', err);
       setError(msg);
     } finally {
       setIsLoading(false);
