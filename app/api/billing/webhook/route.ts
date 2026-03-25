@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type Stripe from 'stripe';
+import { logger } from '@/lib/logger';
 
 export async function POST(request: Request) {
   // Stripe webhook signature verification requires raw body
@@ -23,14 +24,14 @@ export async function POST(request: Request) {
     );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Signature verification failed';
-    console.error('[Webhook] Signature verification failed:', message);
+    logger.error('Webhook signature verification failed', { endpoint: 'POST /api/billing/webhook' }, err instanceof Error ? err : undefined);
     return NextResponse.json(
-      { error: `Webhook signature verification failed: ${message}` },
+      { error: 'Webhook signature verification failed' },
       { status: 400 },
     );
   }
 
-  console.log(`[Webhook] Received event: ${event.type}`);
+  logger.info(`Webhook event: ${event.type}`, { endpoint: 'POST /api/billing/webhook' });
 
   try {
     switch (event.type) {
@@ -55,11 +56,10 @@ export async function POST(request: Request) {
         break;
 
       default:
-        console.log(`[Webhook] Unhandled event type: ${event.type}`);
+        logger.info(`Webhook unhandled event: ${event.type}`, { endpoint: 'POST /api/billing/webhook' });
     }
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Handler error';
-    console.error(`[Webhook] Error handling ${event.type}:`, message);
+    logger.error(`Webhook handler error for ${event.type}`, { endpoint: 'POST /api/billing/webhook' }, err instanceof Error ? err : undefined);
     // Still return 200 to prevent Stripe from retrying endlessly
   }
 

@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limiter';
 import { authenticate } from '@/lib/auth-helpers';
 import { validateGoalText } from '@/lib/content-validator';
+import { logger } from '@/lib/logger';
+import { generateRequestId, handleUnknownError } from '@/lib/api-error';
 
 export async function POST(req: NextRequest) {
+  const requestId = generateRequestId();
+  const endpoint = 'POST /api/goals/new';
+
   try {
     // Unified auth: support both NextAuth session (web) and header-based auth (CLI)
     const auth = await authenticate(req);
@@ -15,6 +20,7 @@ export async function POST(req: NextRequest) {
     const ip = getClientIp(req.headers);
     const rateCheck = checkRateLimit(`goals_new:${ip}`, 10, 3600000);
     if (!rateCheck.allowed) {
+      logger.warn('Rate limit exceeded', { requestId, userId: auth.customerId, endpoint });
       return NextResponse.json(
         { error: 'Rate limit exceeded. Try again later.' },
         { status: 429 },
@@ -52,19 +58,18 @@ export async function POST(req: NextRequest) {
         customerContext: customerContext ?? {},
       });
 
+      logger.info('Goal created', { requestId, userId: customerId, endpoint });
+
       return NextResponse.json({
         goalId: goal.id,
         status: goal.status,
         createdAt: goal.createdAt.toISOString(),
       });
     } catch (dbErr: unknown) {
-      const message = dbErr instanceof Error ? dbErr.message : 'Database error';
-      console.error('[API /goals/new] DB error:', message);
-      return NextResponse.json({ error: message }, { status: 500 });
+      logger.error('DB error creating goal', { requestId, endpoint }, dbErr instanceof Error ? dbErr : undefined);
+      return NextResponse.json({ error: 'Failed to create goal' }, { status: 500 });
     }
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Internal server error';
-    console.error('[API /goals/new]', message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return handleUnknownError(err, endpoint, requestId);
   }
 }

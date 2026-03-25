@@ -7,8 +7,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(req: NextRequest) {
-  const secret = req.headers.get('x-cron-secret') || req.nextUrl.searchParams.get('secret');
-  if (secret !== process.env.CRON_SECRET) {
+  // Phase 5.2: Fixed auth -- removed query string auth (leaks secret in URL/logs).
+  // Accept authorization header (Vercel cron) or x-cron-secret header (manual).
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) {
+    return NextResponse.json({ error: 'Server misconfiguration' }, { status: 500 });
+  }
+
+  const authHeader = req.headers.get('authorization');
+  const cronHeader = req.headers.get('x-cron-secret');
+  const isAuthorized =
+    authHeader === `Bearer ${cronSecret}` ||
+    cronHeader === cronSecret;
+
+  if (!isAuthorized) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

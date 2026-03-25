@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate } from '@/lib/auth-helpers';
+import { logger } from '@/lib/logger';
 
 // Force dynamic to prevent any response caching
 export const dynamic = 'force-dynamic';
@@ -131,15 +132,14 @@ export async function GET(
 
       // Distinguish "not found" from other DB errors
       if (message.includes('not found')) {
-        return NextResponse.json({ error: message }, { status: 404 });
+        return NextResponse.json({ error: 'Goal not found' }, { status: 404 });
       }
 
-      console.error('[API /goals/[id]] DB error:', message);
-      return NextResponse.json({ error: message }, { status: 500 });
+      logger.error('DB error fetching goal', { endpoint: `GET /api/goals/${goalId}` }, dbErr instanceof Error ? dbErr : undefined);
+      return NextResponse.json({ error: 'Failed to load goal' }, { status: 500 });
     }
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Internal server error';
-    console.error('[API /goals/[id]]', message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    logger.error('Error in goal detail', { endpoint: 'GET /api/goals/[id]' }, err instanceof Error ? err : undefined);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

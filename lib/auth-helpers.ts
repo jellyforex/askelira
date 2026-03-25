@@ -9,6 +9,7 @@
 import { NextRequest } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
+import { logger } from '@/lib/logger';
 
 export interface AuthResult {
   authenticated: boolean;
@@ -66,6 +67,15 @@ export async function authenticate(req: NextRequest): Promise<AuthResult> {
 
   // Simple auth: apiKey must equal email (matching verify-key route logic)
   if (apiKey.trim() !== email.trim()) {
+    // Phase 5.2: Track failed auth for suspicious activity detection
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+    logger.warn('Header auth failed: key/email mismatch', { userId: email });
+    try {
+      const { recordFailedAuth } = await import('@/lib/suspicious-activity');
+      recordFailedAuth(ip);
+    } catch {
+      // suspicious-activity module not available -- continue
+    }
     return {
       authenticated: false,
       customerId: null,
@@ -102,10 +112,9 @@ export async function authenticate(req: NextRequest): Promise<AuthResult> {
     };
   } catch (dbErr: unknown) {
     // DB unavailable - allow auth anyway (development fallback)
-    console.warn(
-      '[auth-helpers] DB unavailable, allowing header-based auth:',
-      dbErr instanceof Error ? dbErr.message : dbErr,
-    );
+    logger.warn('DB unavailable, allowing header-based auth', {
+      userId: email,
+    });
     return {
       authenticated: true,
       customerId: email,

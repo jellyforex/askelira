@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate } from '@/lib/auth-helpers';
+import { logger } from '@/lib/logger';
 
 export async function GET(req: NextRequest) {
   try {
@@ -48,15 +49,13 @@ export async function GET(req: NextRequest) {
 
       return NextResponse.json({ goals });
     } catch (dbErr: unknown) {
-      const message = dbErr instanceof Error ? dbErr.message : 'Database error';
-      console.error('[API /goals] DB error:', message);
+      logger.error('DB error listing goals', { endpoint: 'GET /api/goals' }, dbErr instanceof Error ? dbErr : undefined);
 
       // Graceful fallback: return empty array if DB is unavailable (local dev)
       return NextResponse.json({ goals: [] });
     }
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Internal server error';
-    console.error('[API /goals]', message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    logger.error('Error in goals list', { endpoint: 'GET /api/goals' }, err instanceof Error ? err : undefined);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

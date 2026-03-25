@@ -1,10 +1,10 @@
-import { NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { authenticate } from '@/lib/auth-helpers';
 
-export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
+export async function GET(req: NextRequest) {
+  // Unified auth: support both NextAuth session (web) and header-based auth (CLI)
+  const auth = await authenticate(req);
+  if (!auth.authenticated || !auth.customerId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -12,8 +12,8 @@ export async function GET() {
 
   if (!apiKey) {
     return NextResponse.json({
-      error: 'ANTHROPIC_API_KEY not set',
-    });
+      error: 'ANTHROPIC_API_KEY not configured',
+    }, { status: 503 });
   }
 
   // Test API call
@@ -46,7 +46,7 @@ export async function GET() {
       response: data,
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error('[API /test-anthropic]', err instanceof Error ? err.message : err);
+    return NextResponse.json({ error: 'Anthropic API test failed' }, { status: 500 });
   }
 }

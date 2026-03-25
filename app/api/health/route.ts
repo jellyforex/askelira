@@ -33,9 +33,12 @@ export async function GET() {
       latencyMs: Date.now() - start,
     };
   } catch (err) {
+    // Phase 5.2: Do not expose DB error details in production
     health.database = {
       status: 'disconnected',
-      error: err instanceof Error ? err.message : 'Unknown error',
+      ...(process.env.NODE_ENV !== 'production' && {
+        error: err instanceof Error ? err.message : 'Unknown error',
+      }),
     };
     health.status = 'degraded';
   }
@@ -70,6 +73,7 @@ export async function GET() {
   }
 
   // Phase 5: Check critical environment variables
+  // Phase 5.2: Do not expose specific var names in production (information disclosure)
   const requiredEnvVars = [
     'DATABASE_URL',
     'NEXTAUTH_SECRET',
@@ -80,7 +84,9 @@ export async function GET() {
   if (missingEnvVars.length > 0) {
     health.environment_vars = {
       status: 'missing',
-      missing: missingEnvVars,
+      count: missingEnvVars.length,
+      // Only show names in development
+      ...(process.env.NODE_ENV !== 'production' && { missing: missingEnvVars }),
     };
     health.status = 'degraded';
   } else {
